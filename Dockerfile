@@ -2,8 +2,9 @@
 
 #Don't change here otherwise Repo crashed
 
-# Use a Python 3.9.6 Alpine base image
-FROM python:3.9.6-alpine3.14
+# Pyrofork uses PEP 604 union type annotations (for example, ``int | str``),
+# which require Python 3.10 or newer. Keep the container aligned with runtime.txt.
+FROM python:3.11.1-alpine3.17
 
 # Set the working directory
 WORKDIR /app
