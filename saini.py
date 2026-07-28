@@ -21,6 +21,79 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from base64 import b64decode
 
+CLASSPLUS_KEY_API = os.getenv(
+    "CLASSPLUS_KEY_API", "https://classplus-key-iv.onrender.com/get-key"
+)
+
+
+def extract_classplus_content_id(url):
+    """Return the contentHashId/contentHashIdl value embedded in a CP link."""
+    match = re.search(r"(?:[?&])contentHashIdl?=([^\s&]+)", url, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+async def get_classplus_download(content_id, token):
+    """Resolve an encrypted Classplus content id into its signed download data."""
+    if not token or token == "/d":
+        raise ValueError("A valid Classplus token is required for contentHashId links.")
+
+    timeout = aiohttp.ClientTimeout(total=45)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(
+            CLASSPLUS_KEY_API,
+            params={"contentId": content_id, "token": token},
+        ) as response:
+            response.raise_for_status()
+            data = await response.json(content_type=None)
+
+    if data.get("success") is False:
+        raise RuntimeError(data.get("message") or "Classplus key API rejected the request.")
+
+    signed_url = data.get("encn_sign_url") or data.get("url")
+    if not signed_url:
+        raise RuntimeError("Classplus key API did not return a signed URL.")
+    return signed_url, data.get("key"), data.get("iv")
+
+
+async def download_classplus_video(signed_url, name, key=None, iv=None):
+    """Download a signed CP stream and decrypt it when AES key material is present."""
+    if bool(key) != bool(iv):
+        raise ValueError("Classplus key API must return both key and IV, or neither.")
+    if not key:
+        output_file = f"{name}.mp4"
+        download = await asyncio.create_subprocess_exec(
+            "yt-dlp", signed_url, "-f", "best", "-o", output_file
+        )
+        if await download.wait() != 0:
+            raise RuntimeError("yt-dlp could not download the Classplus stream.")
+        return output_file
+
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", key) or not re.fullmatch(
+        r"[0-9a-fA-F]{32}", iv
+    ):
+        raise ValueError("Classplus AES key and IV must be 32-character hex values.")
+
+    encrypted_file = f"{name}.encrypted.mkv"
+    decrypted_file = f"{name}.mp4"
+    download = await asyncio.create_subprocess_exec(
+        "yt-dlp", signed_url, "-f", "best", "-o", encrypted_file
+    )
+    if await download.wait() != 0:
+        raise RuntimeError("yt-dlp could not download the encrypted Classplus stream.")
+
+    try:
+        decrypt = await asyncio.create_subprocess_exec(
+            "openssl", "enc", "-d", "-aes-128-cbc", "-K", key, "-iv", iv,
+            "-in", encrypted_file, "-out", decrypted_file,
+        )
+        if await decrypt.wait() != 0:
+            raise RuntimeError("OpenSSL could not decrypt the Classplus video.")
+    finally:
+        if os.path.exists(encrypted_file):
+            os.remove(encrypted_file)
+
+    return decrypted_file
+
 def duration(filename):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                              "format=duration", "-of",
