@@ -16,7 +16,7 @@ RUN apk add --no-cache \
     gcc \
     libffi-dev \
     musl-dev \
-    ffmpeg \
+    ffmpeg openssl \
     aria2 \
     make \
     g++ \
