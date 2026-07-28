@@ -24,6 +24,7 @@ from base64 import b64decode
 CLASSPLUS_KEY_API = os.getenv(
     "CLASSPLUS_KEY_API", "https://classplus-key-iv.onrender.com/get-key"
 )
+CLASSPLUS_CONCURRENT_FRAGMENTS = os.getenv("CLASSPLUS_CONCURRENT_FRAGMENTS", "8")
 
 
 def extract_classplus_content_id(url):
@@ -62,7 +63,7 @@ async def download_classplus_video(signed_url, name, key=None, iv=None):
     if not key:
         output_file = f"{name}.mp4"
         download = await asyncio.create_subprocess_exec(
-            "yt-dlp", signed_url, "-f", "best", "-o", output_file
+            *_classplus_yt_dlp_command(signed_url, output_file)
         )
         if await download.wait() != 0:
             raise RuntimeError("yt-dlp could not download the Classplus stream.")
@@ -76,7 +77,7 @@ async def download_classplus_video(signed_url, name, key=None, iv=None):
     encrypted_file = f"{name}.encrypted.mkv"
     decrypted_file = f"{name}.mp4"
     download = await asyncio.create_subprocess_exec(
-        "yt-dlp", signed_url, "-f", "best", "-o", encrypted_file
+        *_classplus_yt_dlp_command(signed_url, encrypted_file)
     )
     if await download.wait() != 0:
         raise RuntimeError("yt-dlp could not download the encrypted Classplus stream.")
@@ -93,6 +94,23 @@ async def download_classplus_video(signed_url, name, key=None, iv=None):
             os.remove(encrypted_file)
 
     return decrypted_file
+
+
+def _classplus_yt_dlp_command(signed_url, output_file):
+    """Build a resilient, observable command for a fragmented Classplus HLS stream."""
+    return [
+        "yt-dlp",
+        "--newline",
+        "--progress",
+        "--concurrent-fragments", CLASSPLUS_CONCURRENT_FRAGMENTS,
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--retry-sleep", "fragment:exp=1:20",
+        "--socket-timeout", "30",
+        "-o", output_file,
+        signed_url,
+    ]
+
 
 def duration(filename):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",

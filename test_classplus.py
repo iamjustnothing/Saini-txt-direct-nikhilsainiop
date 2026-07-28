@@ -18,6 +18,21 @@ class ClassplusContentIdTests(unittest.TestCase):
     def test_returns_none_without_content_hash(self):
         self.assertIsNone(saini.extract_classplus_content_id("https://example.test/master.m3u8"))
 
+    def test_hls_download_command_is_concurrent_and_emits_log_lines(self):
+        command = saini._classplus_yt_dlp_command(
+            "https://example.test/master.m3u8?key=secret", "lecture.mp4"
+        )
+
+        self.assertEqual(command[0], "yt-dlp")
+        self.assertIn("--newline", command)
+        self.assertIn("--concurrent-fragments", command)
+        self.assertIn("--fragment-retries", command)
+        self.assertNotIn("-f", command)
+        self.assertEqual(
+            command[-2:],
+            ["lecture.mp4", "https://example.test/master.m3u8?key=secret"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
